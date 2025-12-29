@@ -1,273 +1,248 @@
-﻿//using RAG.Models;
-//using System.Net.Http.Json;
-//using System.Text.Json.Serialization;
+﻿//namespace RAG.Services;
 
-namespace RAG.Services;
+
+//using OpenAI.VectorStores;
+//using RAGChat.Models;
+//using RAGChat.Services;
+//using System.Net.Http.Headers;
+//using System.Text.Json;
 
 //public class RagService
 //{
-//    private readonly HttpClient _httpClient;
-//    private readonly string _apiKey;
-//    private readonly string _model;
-//    private readonly string _baseUrl;
-//    private readonly int _maxTokens;
-//    private readonly double _temperature;
-//    private readonly string _blogPostsDirectory;
-//    private readonly ILogger<RagService> _logger;
-//    private readonly List<ChatMessage> _conversationHistory = new();
+//    private readonly EmbeddingService _embedding;
+//    private readonly LocalVectorStore _store;
+//    private readonly HttpClient _http;
+//    private readonly IConfiguration _config;
 
 //    public RagService(
-//        IHttpClientFactory httpClientFactory,
-//        IConfiguration configuration,
-//        ILogger<RagService> logger)
+//        EmbeddingService embedding,
+//        LocalVectorStore store,
+//        HttpClient http,
+//        IConfiguration config)
 //    {
-//        _httpClient = httpClientFactory.CreateClient();
-//        _apiKey = configuration["OpenAI:ApiKey"]
-//            ?? throw new ArgumentNullException("OpenAI:ApiKey");
-//        if (string.IsNullOrWhiteSpace(_apiKey))
-//            throw new ArgumentException("OpenAI API Key is empty!");
-
-//        _model = configuration["Model"] ?? "gpt-4o-mini";
-//        _baseUrl = configuration["BaseUrl"] ?? "https://api.openai.com/v1/";
-//        _maxTokens = int.Parse(configuration["MaxTokens"] ?? "2000");
-//        _temperature = double.Parse(configuration["Temperature"] ?? "0.7");
-//        _blogPostsDirectory = configuration["BlogPostsDirectory"]
-//            ?? throw new ArgumentNullException("BlogPostsDirectory");
-//        _logger = logger;
+//        _embedding = embedding;
+//        _store = store;
+//        _http = http;
+//        _config = config;
 //    }
 
-//    public async Task<string> AskAsync(string userMessage)
+//    public async Task<ChatResponse> AskAsync(string question)
 //    {
-//        var relevantDocuments = await FindRelevantDocumentsAsync(userMessage);
+//        var embeddings = await _embedding.CreateBatchEmbeddingAsync(
+//            new List<string> { question });
 
-//        var context = string.Join(
-//            "\n\n",
-//            relevantDocuments.Select(x => $"Title: {x.Title}\n{x.Content}")
-//        );
+//        var qEmbedding = embeddings.First();
+//        // 2️⃣ Search in vector store
+//        var results = _store.Search(qEmbedding, 5).ToList();
 
-//        _conversationHistory.Add(new ChatMessage
+//        //// 3️⃣ لو مفيش نتائج خالص → AI
+//        //if (!results.Any())
+//        //{
+//        //    return new ChatResponse
+//        //    {
+//        //        Source = "ai",
+//        //        Answer = await AskAiAsync(question)
+//        //    };
+//        //}
+
+//        var bestScore = results.First().Score;
+
+//        // 1️⃣ AI فقط (مفيش داتا موثوقة)
+//        if (bestScore < 0.55f)
 //        {
-//            Role = "user",
-//            Content = userMessage
-//        });
-
-//        var messages = new List<ChatMessage>
-//        {
-//            new ChatMessage
+//            return new ChatResponse
 //            {
-//                Role = "system",
-//                Content = "Answer using the context. If answer not in context, say 'I don't know'."
-//            },
-//            new ChatMessage
-//            {
-//                Role = "system",
-//                Content = $"Context:\n{context}"
-//            }
-//        };
-//        messages.AddRange(_conversationHistory);
-
-//        var requestBody = new
-//        {
-//            model = _model,
-//            messages = messages,
-//            max_tokens = _maxTokens,
-//            temperature = _temperature
-//        };
-
-//        var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl.TrimEnd('/')}/chat/completions");
-//        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
-//        request.Content = JsonContent.Create(requestBody);
-
-//        var response = await _httpClient.SendAsync(request);
-
-//        if (!response.IsSuccessStatusCode)
-//        {
-//            var error = await response.Content.ReadAsStringAsync();
-//            _logger.LogError($"OpenAI API Error: {error}");
-//            throw new Exception($"OpenAI API Error: {error}");
+//                Source = "ai",
+//                Answer = await AskAiAsync(question)
+//            };
 //        }
 
-//        var result = await response.Content.ReadFromJsonAsync<OpenAIResponse>();
-//        var answer = result?.Choices?[0]?.Message?.Content ?? "لم أستطع الحصول على إجابة";
+//        var context = string.Join("\n\n",
+//            results.Select(r => r.Chunk.Content));
 
-//        _conversationHistory.Add(new ChatMessage
+//        var answerFromContext =
+//            await AskWithContextAsync(question, context);
+
+//        if (bestScore >= 0.7f)
 //        {
-//            Role = "assistant",
-//            Content = answer
-//        });
+//            var improved =
+//                await ImproveWithAI(answerFromContext, question);
 
-//        return answer;
-//    }
-
-//    private async Task<List<Item>> FindRelevantDocumentsAsync(string userMessage)
-//    {
-//        var relevantDocuments = new List<Item>();
-//        var directory = new DirectoryInfo(_blogPostsDirectory);
-//        if (!directory.Exists) return relevantDocuments;
-
-//        var userEmbedding = await GetEmbeddingAsync(userMessage);
-
-//        foreach (var blogPostDir in directory.GetDirectories("*", SearchOption.AllDirectories))
-//        {
-//            var indexFile = Path.Combine(blogPostDir.FullName, "index.md");
-//            if (!File.Exists(indexFile)) continue;
-
-//            var content = await File.ReadAllTextAsync(indexFile);
-//            foreach (var chunk in ChunkText(content))
+//            return new ChatResponse
 //            {
-//                var chunkEmbedding = await GetEmbeddingAsync(chunk);
-//                var similarity = CosineSimilarity(userEmbedding, chunkEmbedding);
-//                if (similarity > 0.55f)
-//                {
-//                    relevantDocuments.Add(new Item
-//                    {
-//                        Title = blogPostDir.Name,
-//                        Content = chunk,
-//                        Score = (int)(similarity * 100),
-//                        Embedding = chunkEmbedding
-//                    });
-//                    _logger.LogInformation($"Similarity: {similarity}");
-
-//                }
-//            }
+//                Source = "knowledge + ai",
+//                Answer = improved
+//            };
 //        }
 
-//        return relevantDocuments.OrderByDescending(d => d.Score).Take(5).ToList();
-//    }
-
-//    private List<string> ChunkText(string text, int maxWords = 200)
-//    {
-//        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-//        var chunks = new List<string>();
-//        for (int i = 0; i < words.Length; i += maxWords)
-//            chunks.Add(string.Join(" ", words.Skip(i).Take(maxWords)));
-//        return chunks;
-//    }
-
-//    private async Task<float[]> GetEmbeddingAsync(string text)
-//    {
-//        if (string.IsNullOrWhiteSpace(text))
-//            return new float[1536]; // نص فارغ → embedding فارغ
-
-//        var requestBody = new
+//        return new ChatResponse
 //        {
-//            model = "text-embedding-3-small",
-//            input = text
+//            Source = "data",
+//            Answer = answerFromContext
 //        };
 
-//        try
-//        {
-//            var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl.TrimEnd('/')}/embeddings");
-//            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
-//            request.Content = JsonContent.Create(requestBody);
-
-//            var response = await _httpClient.SendAsync(request);
-
-//            if (!response.IsSuccessStatusCode)
-//            {
-//                var error = await response.Content.ReadAsStringAsync();
-//                _logger.LogWarning($"Embedding failed: {error}");
-//                return new float[1536];
-//            }
-
-//            var result = await response.Content.ReadFromJsonAsync<EmbeddingResponse>();
-//            return result?.Data?[0]?.Embedding ?? new float[1536];
-//        }
-//        catch (Exception ex)
-//        {
-//            _logger.LogWarning($"Embedding request exception: {ex.Message}");
-//            return new float[1536];
-//        }
 //    }
-//    //private async Task<float[]> GetEmbeddingAsync(string text)
+
+
+
+//    private async Task<string> AskWithContextAsync(string question, string context)
+//    {
+//        var messages = new[]
+//        {
+//            new { role = "system", content = "Answer ONLY from context." },
+//            new { role = "system", content = $"Context:\n{context}" },
+//            new { role = "user", content = question }
+//        };
+
+//        return await SendAsync(messages);
+//    }
+
+//    private async Task<string> AskAiAsync(string question)
+//    {
+//        var messages = new[]
+//        {
+//            new { role = "system", content = "You are a helpful assistant." },
+//            new { role = "user", content = question }
+//        };
+
+//        return await SendAsync(messages);
+//    }
+
+//    //private async Task<string> SendAsync(object messages)
 //    //{
-//    //    if (string.IsNullOrWhiteSpace(text))
-//    //        return Array.Empty<float>();
-
-//    //    var requestBody = new
+//    //    var body = new
 //    //    {
-//    //        model = "nomic-embed-text",
-//    //        prompt = text
+//    //        model = _config["Model"],
+//    //        messages = messages,
+//    //        max_tokens = int.Parse(_config["MaxTokens"]!),
+//    //        temperature = double.Parse(_config["Temperature"]!)
 //    //    };
 
-//    //    try
-//    //    {
-//    //        var response = await _httpClient.PostAsJsonAsync(
-//    //            "http://localhost:11434/api/embeddings",
-//    //            requestBody
-//    //        );
+//    //    using var req = new HttpRequestMessage(
+//    //        HttpMethod.Post,
+//    //        "https://api.openai.com/v1/chat/completions");
 
-//    //        if (!response.IsSuccessStatusCode)
-//    //        {
-//    //            _logger.LogWarning("Ollama embedding failed");
-//    //            return Array.Empty<float>();
-//    //        }
+//    //    req.Headers.Authorization =
+//    //        new AuthenticationHeaderValue("Bearer", _config["OpenAI:ApiKey"]);
 
-//    //        var result = await response.Content.ReadFromJsonAsync<OllamaEmbeddingResponse>();
-//    //        return result?.Embedding ?? Array.Empty<float>();
-//    //    }
-//    //    catch (Exception ex)
-//    //    {
-//    //        _logger.LogError($"Ollama embedding error: {ex.Message}");
-//    //        return Array.Empty<float>();
-//    //    }
+//    //    req.Content = JsonContent.Create(body);
+
+//    //    var res = await _http.SendAsync(req);
+//    //    res.EnsureSuccessStatusCode();
+
+//    //    using var json = await JsonDocument.ParseAsync(
+//    //        await res.Content.ReadAsStreamAsync());
+
+//    //    return json
+//    //        .RootElement
+//    //        .GetProperty("choices")[0]
+//    //        .GetProperty("message")
+//    //        .GetProperty("content")
+//    //        .GetString()!;
 //    //}
-
-
-//    private static float CosineSimilarity(float[] vectorA, float[] vectorB)
+//    private async Task<string> SendAsync(
+//    object messages,
+//    int maxTokens = 200,
+//    double temperature = 0.2)
 //    {
-//        if (vectorA.Length == 0 || vectorB.Length == 0) return 0f;
-
-//        float dot = 0f, magA = 0f, magB = 0f;
-//        for (int i = 0; i < vectorA.Length; i++)
+//        var body = new
 //        {
-//            dot += vectorA[i] * vectorB[i];
-//            magA += vectorA[i] * vectorA[i];
-//            magB += vectorB[i] * vectorB[i];
+//            model = _config["Model"],
+//            messages,
+//            max_tokens = maxTokens,
+//            temperature = temperature
+//        };
+
+//        using var req = new HttpRequestMessage(
+//            HttpMethod.Post,
+//            "https://api.openai.com/v1/chat/completions");
+
+//        req.Headers.Authorization =
+//            new AuthenticationHeaderValue("Bearer",
+//                _config["OpenAI:ApiKey"]);
+
+//        req.Content = JsonContent.Create(body);
+
+//        using var res = await _http.SendAsync(req);
+//        res.EnsureSuccessStatusCode();
+
+//        using var json = await res.Content.ReadFromJsonAsync<JsonDocument>();
+
+//        return json!
+//            .RootElement
+//            .GetProperty("choices")[0]
+//            .GetProperty("message")
+//            .GetProperty("content")
+//            .GetString()!;
+//    }
+
+//    #region improveWithAI
+//    //public async Task<ChatResponse> AskAsync(string question)
+//    //{
+//    //    var embeddings = await _embedding.CreateBatchEmbeddingAsync(
+//    //        new List<string> { question });
+
+//    //    var qEmbedding = embeddings.First();
+
+//    //    var results = _store.Search(qEmbedding, 3);
+
+//    //    var bestScore = results
+//    //        .Select(r => r.Score)
+//    //        .DefaultIfEmpty(0f)
+//    //        .Max();
+
+//    //    if (bestScore < 0.65f)
+//    //    {
+//    //        return new ChatResponse
+//    //        {
+//    //            Source = "ai",
+//    //            Answer = await AskAiAsync(question)
+//    //        };
+//    //    }
+
+//    //    var context = string.Join("\n\n",
+//    //        results.Select(r => r.Chunk.Content));
+
+//    //    var baseAnswer = await AskWithContextAsync(question, context);
+//    //    var improved = await ImproveWithAI(baseAnswer, question);
+
+//    //    return new ChatResponse
+//    //    {
+//    //        Source = "knowledge + ai",
+//    //        Answer = improved
+//    //    };
+//    //}
+//    private async Task<string> ImproveWithAI(
+//     string baseAnswer,
+//     string question)
+//    {
+//        var messages = new[]
+//        {
+//        new
+//        {
+//            role = "system",
+//            content =
+//            "You are a senior technical advisor. " +
+//            "Rewrite the answer for clarity and professionalism. " +
+//            "You MAY add helpful recommendations ONLY if they are logically implied. " +
+//            "DO NOT add new facts, names, or assumptions."
+//        },
+//        new
+//        {
+//            role = "user",
+//            content =
+//            $"Question:\n{question}\n\n" +
+//            $"Answer:\n{baseAnswer}"
 //        }
-//        return dot / ((float)Math.Sqrt(magA) * (float)Math.Sqrt(magB));
+//    };
+
+//        return await SendAsync(messages, maxTokens: 150, temperature: 0.3);
 //    }
 
-//    // Models
-//    private class ChatMessage
-//    {
-//        [JsonPropertyName("role")]
-//        public string? Role { get; set; }
-
-//        [JsonPropertyName("content")]
-//        public string? Content { get; set; }
-//    }
-
-//    private class OpenAIResponse
-//    {
-//        [JsonPropertyName("choices")]
-//        public Choice[]? Choices { get; set; }
-//    }
-
-//    private class Choice
-//    {
-//        [JsonPropertyName("message")]
-//        public ChatMessage? Message { get; set; }
-//    }
-
-//    private class EmbeddingResponse
-//    {
-//        [JsonPropertyName("data")]
-//        public EmbeddingData[]? Data { get; set; }
-//    }
-
-//    private class EmbeddingData
-//    {
-//        [JsonPropertyName("embedding")]
-//        public float[]? Embedding { get; set; }
-//    }
-//    private class OllamaEmbeddingResponse
-//    {
-//        [JsonPropertyName("embedding")]
-//        public float[]? Embedding { get; set; }
-//    }
-
+//    #endregion
 //}
+namespace RAG.Services;
+
 using OpenAI.VectorStores;
 using RAGChat.Models;
 using RAGChat.Services;
@@ -280,6 +255,9 @@ public class RagService
     private readonly LocalVectorStore _store;
     private readonly HttpClient _http;
     private readonly IConfiguration _config;
+
+    
+    private readonly List<(string Role, string Content)> _chatHistory = new();
 
     public RagService(
         EmbeddingService embedding,
@@ -295,77 +273,150 @@ public class RagService
 
     public async Task<ChatResponse> AskAsync(string question)
     {
-        var embeddings = await _embedding.CreateBatchEmbeddingAsync(
-            new List<string> { question });
+        // احفظ سؤال 
+        _chatHistory.Add(("user", question));
 
-        var qEmbedding = embeddings.First();
-        // 2️⃣ Search in vector store
+        //  Embedding
+        var qEmbedding = (await _embedding
+            .CreateBatchEmbeddingAsync(new() { question }))
+            .First();
+
+        //  Vector Search
         var results = _store.Search(qEmbedding, 5).ToList();
+        var bestScore = results.Any() ? results.First().Score : 0f;
 
-        // 3️⃣ لو مفيش نتائج خالص → AI
-        if (!results.Any())
-        {
-            return new ChatResponse
-            {
-                Source = "ai",
-                Answer = await AskAiAsync(question)
-            };
-        }
-
-        // 4️⃣ لو في نتائج لكن ضعيفة جدًا
-        var bestScore = results.First().Score;
-
+        
         if (bestScore < 0.55f)
         {
+            var aiAnswer = await AskAiWithHistoryAsync();
+
+            _chatHistory.Add(("assistant", aiAnswer));
+
             return new ChatResponse
             {
                 Source = "ai",
-                Answer = await AskAiAsync(question)
+                Answer = aiAnswer
             };
         }
+
+        //  Build Context
         var context = string.Join("\n\n",
             results.Select(r => r.Chunk.Content));
+
+        var baseAnswer =
+            await AskWithContextAndHistoryAsync(context);
+
+        // Knowledge + AI 
+        if (bestScore >= 0.7f)
+        {
+            baseAnswer =
+                await ImproveWithAI(baseAnswer, question);
+
+            _chatHistory.Add(("assistant", baseAnswer));
+
+            return new ChatResponse
+            {
+                Source = "knowledge + ai",
+                Answer = baseAnswer
+            };
+        }
+
+        //  Data فقط
+        _chatHistory.Add(("assistant", baseAnswer));
 
         return new ChatResponse
         {
             Source = "data",
-            Answer = await AskWithContextAsync(question, context)
+            Answer = baseAnswer
         };
     }
 
+    // ================= AI METHODS =================
 
-
-    private async Task<string> AskWithContextAsync(string question, string context)
+    private async Task<string> AskAiWithHistoryAsync()
     {
-        var messages = new[]
+        var messages = new List<object>
         {
-            new { role = "system", content = "Answer ONLY from context." },
-            new { role = "system", content = $"Context:\n{context}" },
-            new { role = "user", content = question }
+            new
+            {
+                role = "system",
+                content =
+                "You are a helpful assistant. " +
+                "Keep the conversation flowing naturally."
+            }
         };
+
+        foreach (var (role, content) in _chatHistory.TakeLast(6))
+            messages.Add(new { role, content });
 
         return await SendAsync(messages);
     }
 
-    private async Task<string> AskAiAsync(string question)
+    private async Task<string> AskWithContextAndHistoryAsync(
+        string context)
     {
-        var messages = new[]
+        var messages = new List<object>
         {
-            new { role = "system", content = "You are a helpful assistant." },
-            new { role = "user", content = question }
+            new
+            {
+                role = "system",
+                content =
+                "Answer ONLY using the provided context. " +
+                "If the answer is not found, say you don't know."
+            },
+            new
+            {
+                role = "system",
+                content = $"Context:\n{context}"
+            }
         };
+
+        foreach (var (role, content) in _chatHistory.TakeLast(6))
+            messages.Add(new { role, content });
 
         return await SendAsync(messages);
     }
 
-    private async Task<string> SendAsync(object messages)
+    private async Task<string> ImproveWithAI(
+     string baseAnswer,
+     string question)
+    {
+        var messages = new[]
+        {
+        new
+        {
+            role = "system",
+            content =
+            "You are a senior technical advisor. " +
+            "Improve the answer for clarity, completeness, and professionalism. " +
+            "You MAY add short, useful recommendations or mention related roles " +
+            "ONLY if they are logically implied by the context. " +
+            "Do NOT invent names, facts, or internal company information."
+        },
+        new
+        {
+            role = "user",
+            content =
+            $"Question:\n{question}\n\n" +
+            $"Answer:\n{baseAnswer}"
+        }
+    };
+
+        return await SendAsync(messages, maxTokens: 180, temperature: 0.45);
+    }
+
+
+    private async Task<string> SendAsync(
+        object messages,
+        int maxTokens = 200,
+        double temperature = 0.2)
     {
         var body = new
         {
             model = _config["Model"],
-            messages = messages,
-            max_tokens = int.Parse(_config["MaxTokens"]!),
-            temperature = double.Parse(_config["Temperature"]!)
+            messages,
+            max_tokens = maxTokens,
+            temperature
         };
 
         using var req = new HttpRequestMessage(
@@ -373,77 +424,22 @@ public class RagService
             "https://api.openai.com/v1/chat/completions");
 
         req.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["OpenAI:ApiKey"]);
+            new AuthenticationHeaderValue(
+                "Bearer", _config["OpenAI:ApiKey"]);
 
         req.Content = JsonContent.Create(body);
 
-        var res = await _http.SendAsync(req);
+        using var res = await _http.SendAsync(req);
         res.EnsureSuccessStatusCode();
 
-        using var json = await JsonDocument.ParseAsync(
-            await res.Content.ReadAsStreamAsync());
+        using var json =
+            await res.Content.ReadFromJsonAsync<JsonDocument>();
 
-        return json
+        return json!
             .RootElement
             .GetProperty("choices")[0]
             .GetProperty("message")
             .GetProperty("content")
             .GetString()!;
     }
-    #region improveWithAI
-    //public async Task<ChatResponse> AskAsync(string question)
-    //{
-    //    var embeddings = await _embedding.CreateBatchEmbeddingAsync(
-    //        new List<string> { question });
-
-    //    var qEmbedding = embeddings.First();
-
-    //    var results = _store.Search(qEmbedding, 3);
-
-    //    var bestScore = results
-    //        .Select(r => r.Score)
-    //        .DefaultIfEmpty(0f)
-    //        .Max();
-
-    //    if (bestScore < 0.65f)
-    //    {
-    //        return new ChatResponse
-    //        {
-    //            Source = "ai",
-    //            Answer = await AskAiAsync(question)
-    //        };
-    //    }
-
-    //    var context = string.Join("\n\n",
-    //        results.Select(r => r.Chunk.Content));
-
-    //    var baseAnswer = await AskWithContextAsync(question, context);
-    //    var improved = await ImproveWithAI(baseAnswer, question);
-
-    //    return new ChatResponse
-    //    {
-    //        Source = "knowledge + ai",
-    //        Answer = improved
-    //    };
-    //}
-    //private async Task<string> ImproveWithAI(string baseAnswer, string question)
-    //{
-    //    var messages = new[]
-    //    {
-    //    new
-    //    {
-    //        role = "system",
-    //        content = "You are a senior software architect. Improve the answer and add smart, practical suggestions without changing the factual meaning."
-    //    },
-    //    new
-    //    {
-    //        role = "user",
-    //        content = $"Question: {question}\nCurrent answer: {baseAnswer}"
-    //    }
-    //};
-
-    //    return await SendAsync(messages);
-    //}
-
-    #endregion
 }

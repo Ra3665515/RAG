@@ -41,7 +41,6 @@ Directory.CreateDirectory("Data");
 if (File.Exists(embeddingsPath) &&
     new FileInfo(embeddingsPath).Length > 10)
 {
-    // ✅ تحميل embeddings الجاهزة
     var json = File.ReadAllText(embeddingsPath);
 
     var cached = JsonSerializer.Deserialize<List<DocumentChunk>>(json);
@@ -54,7 +53,6 @@ if (File.Exists(embeddingsPath) &&
 }
 else
 {
-    // ⚠️ يتنفذ مرة واحدة فقط
     if (!File.Exists(knowledgePath))
         throw new FileNotFoundException(
             "knowledge.txt not found", knowledgePath);
@@ -91,7 +89,6 @@ else
 // ===================== Endpoints =====================
 app.MapControllers();
 
-// Test endpoint بسيط
-app.MapGet("/test", () => "API is running 🚀");
+
 
 app.Run();

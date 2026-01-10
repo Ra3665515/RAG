@@ -256,79 +256,93 @@ public class RagService
     private readonly HttpClient _http;
     private readonly IConfiguration _config;
 
-    
+    private readonly AnswerCache _cache;
+
     private readonly List<(string Role, string Content)> _chatHistory = new();
 
     public RagService(
         EmbeddingService embedding,
         LocalVectorStore store,
         HttpClient http,
-        IConfiguration config)
+        IConfiguration config, AnswerCache cache)
     {
         _embedding = embedding;
         _store = store;
         _http = http;
         _config = config;
+        _cache = cache;
     }
 
     public async Task<ChatResponse> AskAsync(string question)
     {
-        // احفظ سؤال 
+        // 0️⃣ CACHE CHECK (الأهم)
+        if (_cache.TryGet(question, out var cached))
+        {
+            return new ChatResponse
+            {
+                Source = "cache",
+                Answer = cached.Answer
+            };
+        }
+
         _chatHistory.Add(("user", question));
 
-        //  Embedding
+        // 1️⃣ Embedding
         var qEmbedding = (await _embedding
             .CreateBatchEmbeddingAsync(new() { question }))
             .First();
 
-        //  Vector Search
+        // 2️⃣ Vector Search
         var results = _store.Search(qEmbedding, 5).ToList();
         var bestScore = results.Any() ? results.First().Score : 0f;
 
-        
+        ChatResponse response;
+
         if (bestScore < 0.55f)
         {
             var aiAnswer = await AskAiWithHistoryAsync();
 
-            _chatHistory.Add(("assistant", aiAnswer));
-
-            return new ChatResponse
+            response = new ChatResponse
             {
                 Source = "ai",
                 Answer = aiAnswer
             };
         }
-
-        //  Build Context
-        var context = string.Join("\n\n",
-            results.Select(r => r.Chunk.Content));
-
-        var baseAnswer =
-            await AskWithContextAndHistoryAsync(context);
-
-        // Knowledge + AI 
-        if (bestScore >= 0.7f)
+        else
         {
-            baseAnswer =
-                await ImproveWithAI(baseAnswer, question);
+            var context = string.Join("\n\n",
+                results.Select(r => r.Chunk.Content));
 
-            _chatHistory.Add(("assistant", baseAnswer));
+            var baseAnswer =
+                await AskWithContextAndHistoryAsync(context);
 
-            return new ChatResponse
+            if (bestScore >= 0.7f)
             {
-                Source = "knowledge + ai",
-                Answer = baseAnswer
-            };
+                baseAnswer =
+                    await ImproveWithAI(baseAnswer, question);
+
+                response = new ChatResponse
+                {
+                    Source = "knowledge + ai",
+                    Answer = baseAnswer
+                };
+            }
+            else
+            {
+                response = new ChatResponse
+                {
+                    Source = "data",
+                    Answer = baseAnswer
+                };
+            }
         }
 
-        //  Data فقط
-        _chatHistory.Add(("assistant", baseAnswer));
+        // SAVE TO CACHE
+        _cache.Set(question, response);
 
-        return new ChatResponse
-        {
-            Source = "data",
-            Answer = baseAnswer
-        };
+        _chatHistory.Add(("assistant", response.Answer));
+
+        return response;
     }
 
     // ================= AI METHODS =================

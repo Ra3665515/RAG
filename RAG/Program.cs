@@ -5,20 +5,25 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ===================== Services =====================
+// Services 
 builder.Services.AddControllers();
-
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddHttpClient();
+
+// Local ANN Store
 builder.Services.AddSingleton<LocalVectorStore>();
+builder.Services.AddSingleton<AnswerCache>();
+
+
+// AI Services
 builder.Services.AddSingleton<EmbeddingService>();
 builder.Services.AddSingleton<RagService>();
 
 var app = builder.Build();
 
-// ===================== Middleware =====================
+//  Middleware
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -28,29 +33,30 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseAuthorization();
 
-// ===================== Load Knowledge =====================
+// Load Knowledge 
 var store = app.Services.GetRequiredService<LocalVectorStore>();
 var embedding = app.Services.GetRequiredService<EmbeddingService>();
 
 var embeddingsPath = Path.Combine("Data", "embeddings.json");
 var knowledgePath = Path.Combine("Data", "knowledge.txt");
 
-// تأكدي إن فولدر Data موجود
 Directory.CreateDirectory("Data");
 
+//embeddings cached
 if (File.Exists(embeddingsPath) &&
     new FileInfo(embeddingsPath).Length > 10)
 {
     var json = File.ReadAllText(embeddingsPath);
 
-    var cached = JsonSerializer.Deserialize<List<DocumentChunk>>(json);
+    var cached =
+        JsonSerializer.Deserialize<List<DocumentChunk>>(json);
 
-    if (cached != null)
+    if (cached != null && cached.Any())
     {
-        foreach (var doc in cached)
-            store.Add(doc);
+        store.Add(cached);
     }
 }
+//   generate embeddings 
 else
 {
     if (!File.Exists(knowledgePath))
@@ -61,7 +67,9 @@ else
         .Where(l => !string.IsNullOrWhiteSpace(l))
         .ToList();
 
-    var embeddings = await embedding.CreateBatchEmbeddingAsync(lines);
+    // Create embeddings
+    var embeddings =
+        await embedding.CreateBatchEmbeddingAsync(lines);
 
     var docs = new List<DocumentChunk>();
 
@@ -74,6 +82,7 @@ else
         });
     }
 
+    // Cache embeddings
     File.WriteAllText(
         embeddingsPath,
         JsonSerializer.Serialize(
@@ -82,13 +91,10 @@ else
         )
     );
 
-    foreach (var d in docs)
-        store.Add(d);
+    store.Add(docs);
 }
 
-// ===================== Endpoints =====================
+//  Endpoints 
 app.MapControllers();
-
-
 
 app.Run();

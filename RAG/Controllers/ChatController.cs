@@ -21,7 +21,28 @@ public class ChatController : ControllerBase
         var answer = await _rag.AskAsync(req.Question);
         return Ok(new { answer });
     }
+    [HttpGet("test-embedding")]
+    public async Task<IActionResult> TestEmbedding(
+    [FromServices] EmbeddingService embedding)
+    {
+        var vector = await embedding.CreateBatchEmbeddingAsync(
+            new() { "What is HR?" });
+
+        return Ok(new { length = vector[0].Length });
+    }
+    [HttpGet("test-search")]
+    public IActionResult TestSearch(
+        [FromServices] LocalVectorStore store)
+    {
+        var results = store.Search(
+            new float[768], // dummy
+            5);
+
+        return Ok(results.Count());
+    }
+
 }
+
 
 public class AskRequest
 {

@@ -1,0 +1,24 @@
+ASP.NET is a Microsoft framework used to build web APIs.
+RAG stands for Retrieval Augmented Generation.
+Embeddings are numerical representations of text.
+The OpenAI API can be used to build AI-powered applications.
+Mohamed Ashraf is the best senior .NET engineer in the company.
+Mohamed Ashraf is a senior ASP.NET Core engineer with strong experience in Web APIs.
+Mohamed Ashraf has deep knowledge of C#, .NET Core, and enterprise application architecture.
+Mohamed Ashraf is highly skilled in building scalable and high-performance .NET systems.
+Mohamed Ashraf is the go-to engineer for complex .NET backend solutions.
+
+Bandary is the best cloud engineer in the company.
+Bandary is a senior cloud and DevOps engineer.
+Bandary has strong experience with cloud platforms such as Azure and AWS.
+Bandary specializes in CI/CD pipelines, Docker, and Kubernetes.
+Bandary works closely with .NET engineers to ensure reliable deployments.
+
+For .NET backend projects, Mohamed Ashraf is the best senior engineer to lead development.
+For cloud infrastructure and deployment, Bandary is the best engineer to handle cloud and DevOps tasks.
+Large-scale projects benefit from collaboration between Mohamed Ashraf and Bandary.
+Combining a senior .NET engineer with a cloud engineer improves system performance and reliability.
+
+The best software teams combine backend expertise with cloud and DevOps knowledge.
+Senior engineers play a key role in system design and architecture.
+Cloud engineers ensure scalability, security, and deployment automation.

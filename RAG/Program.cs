@@ -106,6 +106,8 @@ else
 
     store.Add(docs);
 }
+app.MapGet("/", () => Results.Redirect("/swagger"));
+
 
 
 

@@ -1,6 +1,8 @@
-﻿using System.Net.Http.Headers;
+﻿using RAGChat.Models;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Threading;
 
 namespace RAGChat.Services;
 
@@ -8,12 +10,73 @@ public class EmbeddingService
 {
     private readonly HttpClient _http;
     private readonly string _apiKey;
+    private readonly string _path =
+       Path.Combine("Data", "embeddings.json");
+
+    private static readonly object _lock = new();
+
 
     public EmbeddingService(HttpClient http, IConfiguration config)
     {
         _http = http;
         _apiKey = config["OpenAI:ApiKey"]!;
     }
+    public void Append(List<DocumentChunk> docs)
+    {
+        lock (_lock)
+        {
+            List<DocumentChunk> existing;
+
+            if (File.Exists(_path))
+            {
+                var json = File.ReadAllText(_path);
+                existing = JsonSerializer.Deserialize<List<DocumentChunk>>(json)
+                           ?? new List<DocumentChunk>();
+            }
+            else
+            {
+                existing = new List<DocumentChunk>();
+            }
+
+            existing.AddRange(docs);
+
+            File.WriteAllText(
+                _path,
+                JsonSerializer.Serialize(
+                    existing,
+                    new JsonSerializerOptions { WriteIndented = true }
+                )
+            );
+        }
+    }
+
+    public void Remove(Func<DocumentChunk, bool> predicate)
+    {
+        lock (_lock)
+        {
+            if (!File.Exists(_path))
+                return;
+
+            var json = File.ReadAllText(_path);
+
+            var existing =
+                JsonSerializer.Deserialize<List<DocumentChunk>>(json)
+                ?? new List<DocumentChunk>();
+
+            existing = existing
+                .Where(d => !predicate(d))
+                .ToList();
+
+            File.WriteAllText(
+                _path,
+                JsonSerializer.Serialize(
+                    existing,
+                    new JsonSerializerOptions { WriteIndented = true }
+                )
+            );
+        }
+    }
+
     ////openai
     //public async Task<List<float[]>> CreateBatchEmbeddingAsync(List<string> texts)
     //{
@@ -108,5 +171,6 @@ public class EmbeddingService
 
         return results;
     }
+
 
 }

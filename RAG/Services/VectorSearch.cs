@@ -39,13 +39,17 @@ public class VectorResult
     public float Score { get; set; }
 }
 
+
 public class LocalVectorStore
 {
     private readonly List<DocumentChunk> _docs = [];
 
     public void Add(IEnumerable<DocumentChunk> docs)
         => _docs.AddRange(docs);
-
+    public void Remove(Func<DocumentChunk, bool> predicate)
+    {
+        _docs.RemoveAll(d => predicate(d));
+    }
     public IEnumerable<VectorResult> Search(
         float[] query,
         int topK,

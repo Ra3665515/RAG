@@ -25,21 +25,34 @@ public class ChatController : ControllerBase
     public async Task<IActionResult> Feedback(
        [FromBody] FeedbackRequest request)
     {
-        await _rag.LearnFromHumanFeedbackAsync(
-            request.CorrectAnswer,
-            request.Category
-        );
+        var accepted =
+            await _rag.LearnFromLastInteractionAsync(
+                request.CorrectAnswer);
+
+        if (!accepted)
+            return BadRequest(new
+            {
+                status = "rejected",
+                reason = "Correction not validated by AI"
+            });
 
         return Ok(new { status = "learned" });
     }
+
 
 }
 
 public class FeedbackRequest
 {
     public string CorrectAnswer { get; set; } = "";
+}
+public class ChatInteraction
+{
+    public string Question { get; set; } = "";
+    public string Answer { get; set; } = "";
     public string Category { get; set; } = "general";
 }
+
 public class AskRequest
 {
     public string Question { get; set; } = "";
